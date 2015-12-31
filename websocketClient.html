@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+
+<meta charset="utf-8" />
+
+<title>WebSocket Test</title>
+
+<script language="javascript" type="text/javascript">
+
+  var getDataStatus = false;
+  var wsurl = "ws://192.168.81.132:8000/";
+  function init()
+  {
+	//document.myform.url.value = "ws://192.168.81.132:8000/"
+	document.myform.data.value = '{"dbpwd": "root", "log_pos": 107, "dbhost": "127.0.0.1", "dbuser": "root", "log_file": "mysql-bin.000011", "type": "create", "dbport": 3306}'
+	document.myform.inputtext.value = "Hello World!"
+	document.myform.disconnectButton.disabled = true;
+  }
+
+  function doConnect()
+  {
+    document.myform.connectButton.disabled = false;
+    var dataVal = document.myform.data.value;
+	try
+	{
+		var dataObj = JSON.parse(dataVal);
+	}catch(err)
+	{
+		writeToScreen(err+"\n");
+		writeToScreen(" not a json,modify to be a json string,thanks!");
+		return;
+	}
+
+	if( !dataObj.dbport ){ 
+		writeToScreen("dbport is error");  return false;
+	}
+	if( !dataObj.log_pos ){ 
+		writeToScreen("log_pos is error"); return false;
+	}
+	if( !dataObj.dbuser ){ 
+		writeToScreen("dbuser is error");  return false;
+	}
+	if( !dataObj.log_file ){ 
+		writeToScreen("log_file is error");  return false;
+	}
+	if( !dataObj.dbhost ){ 
+		writeToScreen("dbhost is error");  return false;
+	}
+	if( dataObj.type != "create" &&  dataObj.type != "link"){ 
+		writeToScreen("type is error"); return false;
+	}	
+	
+    websocket = new WebSocket(wsurl);
+    websocket.onopen = function(evt) { onOpen(evt) };
+    websocket.onclose = function(evt) { onClose(evt) };
+    websocket.onmessage = function(evt) { onMessage(evt) };
+    websocket.onerror = function(evt) { onError(evt) };
+	
+	
+  }
+  
+  function onOpen(evt)
+  {
+    writeToScreen("connected\n");
+	document.myform.connectButton.disabled = true;
+	document.myform.disconnectButton.disabled = false;
+	var dataVal = document.myform.data.value;
+	//websocket.send("test data");
+	websocket.send(dataVal.toString().substr(0,100).trim());
+	websocket.send(dataVal.toString().substr(100,100).trim());
+	getDataStatus = true;
+  }
+
+  function onClose(evt)
+  {
+	getDataStatus = false;
+    writeToScreen("disconnected\n");
+	document.myform.connectButton.disabled = false;
+	document.myform.disconnectButton.disabled = true;
+  }
+
+  function onMessage(evt)
+  {
+    writeToScreen("" + evt.data + '\n');
+  }
+
+  function onError(evt)
+  {
+    writeToScreen('error: ' + evt.data + '\n');
+
+	websocket.close();
+
+	document.myform.connectButton.disabled = false;
+	document.myform.disconnectButton.disabled = true;
+
+  }
+
+  function doSend(message)
+  {
+	if( getDataStatus == false){
+		return;
+	}
+    //writeToScreen("sent: " + message + '\n'); 
+    websocket.send(message);
+  }
+
+  function writeToScreen(message)
+  {
+    document.myform.outputtext.value += message
+	document.myform.outputtext.scrollTop = document.myform.outputtext.scrollHeight;
+
+  }
+
+  window.addEventListener("load", init, false);
+
+
+   function sendText() {
+		doSend( document.myform.inputtext.value );
+   }
+
+  function clearText() {
+		document.myform.outputtext.value = "";
+   }
+
+   function doDisconnect() {
+		websocket.close();
+   }
+
+
+</script>
+
+<div id="output"></div>
+
+<form name="myform">
+<p>
+<textarea name="outputtext" rows="50" cols="200"></textarea>
+</p>
+<p>
+<textarea name="inputtext" cols="50" style="display:none" ></textarea>
+</p>
+<p>
+<textarea name="data" cols="200"></textarea>
+</p>
+<p>
+<input type="button" style="display:none" name=sendButton value="Send" onClick="sendText();">
+<input type="button" name=clearButton value="Clear" onClick="clearText();">
+<input type="button" name=disconnectButton value="Disconnect" onClick="doDisconnect();">
+<input type="button" name=connectButton value="Connect" onClick="doConnect();">
+</p>
+
+</form>
+</html>
+
+<script >
+//doConnect();
+//doSend();
+
+setInterval("doSend('1')",1000);
+</script>
+
+
