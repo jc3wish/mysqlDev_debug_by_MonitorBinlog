@@ -3,7 +3,8 @@
 python mysql_dev_debug_monitor.py --dbuser root --dbpwd root --dbhost 127.0.0.1 --log_file mysql-bin.000011 --log_pos 107 --listen 8000
 
 #当--dbuser root --dbpwd root --dbport 3306 --dbhost 127.0.0.1 --log_file mysql-bin.000011 --log_pos 107 值 都设置了的时候，系统将会默认启动一个监听mysql 线程，并且其他websocket 连接进来的监听线程将不能杀死这个默认线程，只可以监听查看
-#dbpwd 默认为空，并且这个值必须要有值才能启动
+#dbpwd 默认为空
+#dbuser 默认为空，并且这个值必须要有值才能启动
 #python mysql_dev_debug_monitor.py --help 可以查看启动帮助
 
 #--listen 8000  websocket 监听端口，防火墙要开启这个进程端口

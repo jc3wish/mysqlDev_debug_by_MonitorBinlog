@@ -9,7 +9,7 @@
 #
 # @author <jc3wish@126.com>
 
-#from pprint import pprint
+from pprint import pprint
 from pymysqlreplication import BinLogStreamReader
 from pymysqlreplication.row_event import (
     DeleteRowsEvent,
@@ -50,7 +50,7 @@ parser = OptionParser(usage="usage: %prog [options]", version="%prog 1.0")
 parser.add_option("--dbhost", default='127.0.0.1', type='string', action="store", dest="dbhost", help="hostname (localhost)")
 parser.add_option("--dbport", default=3306, type='int', action="store", dest="dbport", help="default (3306)")
 parser.add_option("--listen", default=8000, type='int', action="store", dest="listen", help="default (8000)")
-parser.add_option("--dbuser", default="root", type='string', action="store", dest="dbuser", help="default (root)")
+parser.add_option("--dbuser", default="", type='string', action="store", dest="dbuser", help="default (root)")
 parser.add_option("--dbpwd", default="", type='string', action="store", dest="dbpwd", help="default '',and if you want to start defaut mysql monitor thread,you must set a password and not be ''")
 parser.add_option("--log_file", default="mysql-bin.000011", type='string', action="store", dest="log_file", help="default (mysql-bin.000001)")
 parser.add_option("--log_pos", default=107, type='int', action="store", dest="log_pos", help="default (107)")
@@ -81,7 +81,7 @@ Default_Mysql_Log = {
 
 doDefaultMysqlMonitor = True
 for key in Default_MYSQL_SETTINGS:
-   if Default_MYSQL_SETTINGS[key] == "":
+   if Default_MYSQL_SETTINGS[key] == "" and key != "passwd":
       doDefaultMysqlMonitor = False 
 
 for key in Default_Mysql_Log:
@@ -91,6 +91,8 @@ for key in Default_Mysql_Log:
 #默认监听Mysql线程key 全局变量
 DefaultMysqlMonitorThreadKey = ""
 if doDefaultMysqlMonitor == True:
+   if Default_MYSQL_SETTINGS["passwd"] == "":
+      Default_MYSQL_SETTINGS["passwd"] = raw_input("input mysql password:")
    DefaultMysqlMonitorThreadKey = Default_MYSQL_SETTINGS["host"]+str(Default_MYSQL_SETTINGS["port"])
 
 
@@ -229,7 +231,7 @@ def main():
 		#开启默认监听mysql 线程，假如开始失败，将直接结束进程，这里不能用try，因为方法里面有抛异常，并且方法里只会返回指定格式的字典
 		returnData = createMonitorMysqlThread(DefaultMysqlMonitorThreadKey,Default_Mysql_Log,Default_MYSQL_SETTINGS,)
 		if returnData["status"] == True:
-			print "start DefaultMysqlMonitorThread "+ DefaultMysqlMonitorThreadKey +"success!"
+			print "start DefaultMysqlMonitorThread "+ DefaultMysqlMonitorThreadKey + "..."
 		else:
 			print returnData["msg"]
 			sys.exit(0)
@@ -250,46 +252,49 @@ def main():
 #监听方法
 def doRep(logPosConObj,MYSQL_SETTINGS):
 	key = MYSQL_SETTINGS["host"]+str(MYSQL_SETTINGS["port"])
-	
-	stream = BinLogStreamReader(
-		connection_settings=MYSQL_SETTINGS,server_id=100,
-        only_events=[DeleteRowsEvent, WriteRowsEvent, UpdateRowsEvent, RotateEvent,QueryEvent],
-		log_file=logPosConObj["log_file"],blocking=True,log_pos=logPosConObj["log_pos"])
+	try:
+		stream = BinLogStreamReader(
+			connection_settings=MYSQL_SETTINGS,server_id=100,
+			only_events=[DeleteRowsEvent, WriteRowsEvent, UpdateRowsEvent, RotateEvent,QueryEvent],
+			log_file=logPosConObj["log_file"],blocking=True,log_pos=logPosConObj["log_pos"])
+		for binlogevent in stream:
+			#prefix = "%s:%s:" % (binlogevent.schema, binlogevent.table)
 		
-	for binlogevent in stream:
-        #prefix = "%s:%s:" % (binlogevent.schema, binlogevent.table)
-	
-		if isinstance(binlogevent, RotateEvent):
-			#pprint (vars(binlogevent.packet))
-			logPosConObj["log_file"]=binlogevent.packet.event.next_binlog
-			logPosConObj["log_pos"]=binlogevent.packet.log_pos
-			#logPosObject.setData(logPosConObj)
-			continue
-		if isinstance(binlogevent, QueryEvent):
-			#pprint (vars(binlogevent.packet))
-			sendMsg(key,binlogevent.query,binlogevent.timestamp)
-			#logPosObject.setData(logPosConObj)
-			continue
-		for row in binlogevent.rows:
-			#dbtable = binlogevent.schema+"_"+binlogevent.table
-			if isinstance(binlogevent, DeleteRowsEvent):
-				#print 'DeleteRowsEvent'
-				sendMsg(key,row.get("values",object),binlogevent.timestamp)
-				#func(row.get("values",object))
-			elif isinstance(binlogevent, UpdateRowsEvent):
-				#print 'UpdateRowsEvent'
-				#print row
-				sendMsg(key,row,binlogevent.timestamp)
-				#func(row.get("after_values",object))
-			elif isinstance(binlogevent, WriteRowsEvent):
-				#print 'WriteRowsEvent'
-				#print row
-				sendMsg(key,row.get("values",object),binlogevent.timestamp)
-				#func(row.get("values",object))
-			logPosConObj["log_pos"]=binlogevent.packet.log_pos
-			#logPosObject.setData(logPosConObj)
-	
-	stream.close()
+			if isinstance(binlogevent, RotateEvent):
+				#pprint (vars(binlogevent.packet))
+				logPosConObj["log_file"]=binlogevent.packet.event.next_binlog
+				logPosConObj["log_pos"]=binlogevent.packet.log_pos
+				#logPosObject.setData(logPosConObj)
+				continue
+			if isinstance(binlogevent, QueryEvent):
+				#pprint (vars(binlogevent.packet))
+				sendMsg(key,binlogevent.query,binlogevent.timestamp)
+				#logPosObject.setData(logPosConObj)
+				continue
+			for row in binlogevent.rows:
+				#dbtable = binlogevent.schema+"_"+binlogevent.table
+				if isinstance(binlogevent, DeleteRowsEvent):
+					#print 'DeleteRowsEvent'
+					sendMsg(key,row.get("values",object),binlogevent.timestamp)
+					#func(row.get("values",object))
+				elif isinstance(binlogevent, UpdateRowsEvent):
+					#print 'UpdateRowsEvent'
+					#print row
+					sendMsg(key,row,binlogevent.timestamp)
+					#func(row.get("after_values",object))
+				elif isinstance(binlogevent, WriteRowsEvent):
+					#print 'WriteRowsEvent'
+					#print row
+					sendMsg(key,row.get("values",object),binlogevent.timestamp)
+					#func(row.get("values",object))
+				logPosConObj["log_pos"]=binlogevent.packet.log_pos
+				#logPosObject.setData(logPosConObj)
+		
+		stream.close()
+	except BaseException,e :
+		print(e)
+		return
+		
 
 #开启websocket
 def doWebSocket(ip,port):
