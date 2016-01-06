@@ -9,7 +9,7 @@
 #
 # @author <jc3wish@126.com>
 
-from pprint import pprint
+#from pprint import pprint
 from pymysqlreplication import BinLogStreamReader
 from pymysqlreplication.row_event import (
     DeleteRowsEvent,
@@ -20,7 +20,7 @@ from pymysqlreplication.event import (
     RotateEvent,
     QueryEvent
 )
-#import thread
+
 import time
 import threading
 
@@ -34,17 +34,6 @@ import json
 from SimpleWebSocketServer import WebSocket, SimpleWebSocketServer, SimpleSSLWebSocketServer
 
 from optparse import OptionParser
-
-
-def get_ip_address(ifname):
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    return socket.inet_ntoa(fcntl.ioctl(
-        s.fileno(),
-        0x8915,  # SIOCGIFADDR
-        struct.pack('256s', ifname[:15])
-    )[20:24])
-#print get_ip_address('lo')
-#print get_ip_address('eth0')
 
 parser = OptionParser(usage="usage: %prog [options]", version="%prog 1.0")
 parser.add_option("--dbhost", default='127.0.0.1', type='string', action="store", dest="dbhost", help="hostname (localhost)")
@@ -62,16 +51,9 @@ Default_MYSQL_SETTINGS = {
     "port": options.dbport,
     "user": options.dbuser,
     "passwd": options.dbpwd,
-#    "log_file":options.log_file,
-#    "log_pos":options.log_pos,
-#    "type":"create",
 }
-
-#print json.dumps(MYSQL_SETTINGS)
-#sys.exit(0)
-
 # websokcet 监控Ip,port 全局变量
-WobSocketIp = get_ip_address('eth0')
+WobSocketIp = "0.0.0.0"
 WobSocketPort = options.listen
 	
 Default_Mysql_Log = {
@@ -93,18 +75,15 @@ DefaultMysqlMonitorThreadKey = ""
 if doDefaultMysqlMonitor == True:
    if Default_MYSQL_SETTINGS["passwd"] == "":
       Default_MYSQL_SETTINGS["passwd"] = raw_input("input mysql password:")
-   DefaultMysqlMonitorThreadKey = Default_MYSQL_SETTINGS["host"]+str(Default_MYSQL_SETTINGS["port"])
+   DefaultMysqlMonitorThreadKey = Default_MYSQL_SETTINGS["host"]+":"+str(Default_MYSQL_SETTINGS["port"])
 
-
-
-
-#dbTableDict={
-#	"test_tb1":tb1.doData
-#}
 #监控mysql 线程池,global 
 thread_pool = {}
 #客户端连接池 global
 clients={} 
+#线程锁池 global
+mutex = {} 
+
 class websocket(WebSocket):
     #多个包发送到服务端再组合成一个字符串
     linkinfo = ""
@@ -115,9 +94,6 @@ class websocket(WebSocket):
        if self.data == "1":
           return
        self.linkinfo += self.data
-       #self.linkinfo += self.data
-       #print self.linkinfo
-       #return
        # 每次接收100个字符，假如少于这个数说明已经接收完了
        if len(self.data) == 100:
           return
@@ -139,26 +115,38 @@ class websocket(WebSocket):
              "log_file":data["log_file"],
              "log_pos": data["log_pos"],
           }
-          key = MYSQL_SETTINGS["host"]+str(MYSQL_SETTINGS["port"])
+          key = MYSQL_SETTINGS["host"]+":"+str(MYSQL_SETTINGS["port"])
           #假如连接的是默认的监听mysql 线程，将直接转为 link 连接。不能杀死默认线程  print MYSQL_BinLog
           if DefaultMysqlMonitorThreadKey == key:
              data["type"] = "link"
           self.connectinfo = key
+          #给当前mysql slave 信息连接创建一个线程锁，防止其他websocket 连接进来对这这个slave进行创建
+          mutex[key] = threading.Lock()
        if data["type"] == "create":
-          # 假如当前mysql监控已经存在 则先 把线程杀死 创建新线程
-          returnData = createMonitorMysqlThread(key,MYSQL_BinLog,MYSQL_SETTINGS,)
-          if returnData["status"] == True:
-             clients[key]=[]
-             clients[key].append(self)
-          else:
-             print returnData["msg"]
-             self.sendMessage(u''+returnData["msg"])
-             self.close()
-             return
+          # 假如当前mysql监控已经存在 则先 把线程杀死 创建新线程, 加入线程锁，防止其他线程连接进来创建
+          if mutex[key].acquire(2):
+             returnData = createMonitorMysqlThread(key,MYSQL_BinLog,MYSQL_SETTINGS,)
+             if returnData["status"] == True:
+                clients[key]=[]
+                clients[key].append(self)
+             else:
+                print returnData["msg"]
+                self.sendMessage(u''+returnData["msg"])
+                self.close()
+                mutex[key].release()
+                return
+          mutex[key].release()
 
        elif data["type"] == "link":
-             if clients.has_key(key):
-                clients.get(key,object).append(self)
+             #假如线程池中已经有了当前mysql slave 线程，将直接在在当前mysql slave 线程的客户池中追加当前websocket，并加入线程锁，做到线程安全
+             if thread_pool.has_key(key):
+                if mutex[key].acquire(2):
+                   if clients.has_key(key) == False:
+                      clients[key]=[]
+                      clients[key].append(self)
+                   else:
+                      clients[key].append(self)
+                mutex[key].release()
              else:
                 print "Error: no "+ key +"thread"
                 self.sendMessage(u''+ "mysql monitor thread no exsit,you can use type:create try again!")
@@ -171,16 +159,10 @@ class websocket(WebSocket):
 
     def handleConnected(self):
        print self.address, 'connected'
-       #for client in clients:
-          #client.sendMessage(self.address[0] + u' - connected')
-       #clients.append(self)
 
     def handleClose(self):
        #从用户连接池中删除
        clients.get(self.connectinfo).remove(self)
-       print self.address, 'closed'
-       #for client in clients:
-          #client.sendMessage(self.address[0] + u' - disconnected')
 
 #发送信息
 def sendMsg(key,data,timestamp):
@@ -242,21 +224,22 @@ def main():
 		#开启websocket线程
 		doWebSocket(WobSocketIp,WobSocketPort,)
 		#thread.start_new_thread( doWebSocket, (WobSocketIp,WobSocketPort,) )
-	except:
-		print "Error: unable to start websocket server"
+	except Exception,e:
+		print "Error: unable to start websocket server,error : " ,e
+		print "system exit out success"
+		sys.exit(0)
 
 	while 1:
 	   pass	
-	#sys.exit(0)
 
 #监听方法
 def doRep(logPosConObj,MYSQL_SETTINGS):
-	key = MYSQL_SETTINGS["host"]+str(MYSQL_SETTINGS["port"])
+	key = MYSQL_SETTINGS["host"]+":"+str(MYSQL_SETTINGS["port"])
 	try:
 		stream = BinLogStreamReader(
 			connection_settings=MYSQL_SETTINGS,server_id=100,
-			only_events=[DeleteRowsEvent, WriteRowsEvent, UpdateRowsEvent, RotateEvent,QueryEvent],
-			log_file=logPosConObj["log_file"],blocking=True,log_pos=logPosConObj["log_pos"])
+			only_events=[DeleteRowsEvent, WriteRowsEvent, UpdateRowsEvent, RotateEvent,QueryEvent],blocking=True,
+			log_file=logPosConObj["log_file"],log_pos=logPosConObj["log_pos"])
 		for binlogevent in stream:
 			#prefix = "%s:%s:" % (binlogevent.schema, binlogevent.table)
 		
@@ -287,7 +270,7 @@ def doRep(logPosConObj,MYSQL_SETTINGS):
 					#print row
 					sendMsg(key,row.get("values",object),binlogevent.timestamp)
 					#func(row.get("values",object))
-				logPosConObj["log_pos"]=binlogevent.packet.log_pos
+				#logPosConObj["log_pos"]=binlogevent.packet.log_pos
 				#logPosObject.setData(logPosConObj)
 		
 		stream.close()
